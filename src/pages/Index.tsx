@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { SplashScreen } from '@/components/SplashScreen';
 import Dashboard from '@/pages/Dashboard';
@@ -11,10 +11,13 @@ const Index = () => {
 
   const handleSplashComplete = useCallback(() => {
     setShowSplash(false);
-    if (!user && !loading) {
-      navigate('/auth');
+  }, []);
+
+  useEffect(() => {
+    if (!showSplash && !loading && !user) {
+      navigate('/auth', { replace: true });
     }
-  }, [user, loading, navigate]);
+  }, [showSplash, loading, user, navigate]);
 
   if (showSplash) {
     return <SplashScreen onComplete={handleSplashComplete} />;
@@ -29,7 +32,6 @@ const Index = () => {
   }
 
   if (!user) {
-    navigate('/auth');
     return null;
   }
 
