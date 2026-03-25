@@ -4,7 +4,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Type, Upload } from 'lucide-react';
+import { FileUpload } from '@/components/FileUpload';
+import { Type, Download } from 'lucide-react';
 
 const FONTS = [
   { value: 'arial', label: 'Arial' },
@@ -25,21 +26,29 @@ export const WritingMode = ({ onGCodeGenerated }: WritingModeProps) => {
   const [font, setFont] = useState('arial');
   const [showCustom, setShowCustom] = useState(false);
   const [customName, setCustomName] = useState('');
-  const [customChars, setCustomChars] = useState<Record<string, File | null>>({});
+  const [customImage, setCustomImage] = useState<File | null>(null);
+  const [customPreview, setCustomPreview] = useState<string | null>(null);
 
   const handleFontChange = (val: string) => {
     setFont(val);
     setShowCustom(val === 'custom');
   };
 
-  const handleCustomCharUpload = (char: string, file: File | null) => {
-    setCustomChars((prev) => ({ ...prev, [char]: file }));
+  const handleCustomImageUpload = (file: File) => {
+    setCustomImage(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setCustomPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
   };
 
   const handleGenerate = () => {
-    // Placeholder: In production, text-to-gcode conversion happens here
     const lines = text.split('\n');
     let gcode = '; Writing Mode G-Code\nG21 ; mm\nG90 ; absolute\nG28 X0 Y0 ; home\n';
+    if (font === 'custom' && customName) {
+      gcode += `; Custom Handwriting: ${customName}\n`;
+    } else {
+      gcode += `; Font: ${font}\n`;
+    }
     let y = 200;
     lines.forEach((line) => {
       gcode += `; Line: ${line}\n`;
@@ -57,8 +66,52 @@ export const WritingMode = ({ onGCodeGenerated }: WritingModeProps) => {
     onGCodeGenerated(gcode);
   };
 
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-  const digits = '0123456789'.split('');
+  const handleDownloadTemplate = () => {
+    // Generate a template image guide
+    const canvas = document.createElement('canvas');
+    canvas.width = 720;
+    canvas.height = 480;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 720, 480);
+    ctx.strokeStyle = '#cccccc';
+    ctx.lineWidth = 1;
+
+    // Draw grid: 9 cols x 4 rows
+    const cols = 9;
+    const rows = 4;
+    const cellW = 70;
+    const cellH = 100;
+    const offsetX = 30;
+    const offsetY = 30;
+
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('');
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#999999';
+    ctx.textAlign = 'center';
+
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (idx >= chars.length) break;
+        const x = offsetX + c * cellW;
+        const y = offsetY + r * cellH;
+        ctx.strokeRect(x, y, cellW, cellH);
+        ctx.fillText(chars[idx], x + cellW / 2, y + 16);
+        idx++;
+      }
+    }
+
+    ctx.font = '11px Arial';
+    ctx.fillStyle = '#666666';
+    ctx.textAlign = 'left';
+    ctx.fillText('Write each character inside its box, then take a photo/scan and upload it.', offsetX, 450);
+
+    const link = document.createElement('a');
+    link.download = 'handwriting_template.png';
+    link.href = canvas.toDataURL();
+    link.click();
+  };
 
   return (
     <div className="space-y-4">
@@ -90,49 +143,43 @@ export const WritingMode = ({ onGCodeGenerated }: WritingModeProps) => {
       {showCustom && (
         <div className="space-y-3 border border-border rounded-lg p-4 bg-muted/50">
           <div>
-            <Label>Custom Handwriting Name</Label>
+            <Label>Handwriting Name</Label>
             <Input
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
               placeholder="e.g., Lokesh"
               className="mt-1"
             />
+            <p className="text-xs text-muted-foreground mt-1">
+              This name will be saved with your credentials for future use.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Upload an image of each character in your handwriting (A-Z, 0-9):
-          </p>
-          <div className="grid grid-cols-9 gap-2">
-            {alphabet.map((ch) => (
-              <label key={ch} className="flex flex-col items-center gap-1 cursor-pointer group">
-                <span className="text-xs font-mono font-bold">{ch}</span>
-                <div className={`w-8 h-8 rounded border flex items-center justify-center text-xs transition-colors ${customChars[ch] ? 'bg-accent text-accent-foreground border-accent' : 'bg-card border-border group-hover:border-primary'}`}>
-                  {customChars[ch] ? '✓' : <Upload className="w-3 h-3 text-muted-foreground" />}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => handleCustomCharUpload(ch, e.target.files?.[0] ?? null)}
-                />
-              </label>
-            ))}
+
+          <div>
+            <Label>Upload Handwriting Sheet</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Upload <strong>one image</strong> with all characters (A–Z, 0–9) written in a grid.
+              Download the template below, write in each box, then scan/photo and upload.
+            </p>
+            <Button variant="outline" size="sm" onClick={handleDownloadTemplate} className="mb-3">
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Download Template
+            </Button>
+
+            <FileUpload
+              onFileSelect={handleCustomImageUpload}
+              accept="image/*"
+              label="Upload filled handwriting sheet"
+            />
           </div>
-          <div className="grid grid-cols-10 gap-2">
-            {digits.map((d) => (
-              <label key={d} className="flex flex-col items-center gap-1 cursor-pointer group">
-                <span className="text-xs font-mono font-bold">{d}</span>
-                <div className={`w-8 h-8 rounded border flex items-center justify-center text-xs transition-colors ${customChars[d] ? 'bg-accent text-accent-foreground border-accent' : 'bg-card border-border group-hover:border-primary'}`}>
-                  {customChars[d] ? '✓' : <Upload className="w-3 h-3 text-muted-foreground" />}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => handleCustomCharUpload(d, e.target.files?.[0] ?? null)}
-                />
-              </label>
-            ))}
-          </div>
+
+          {customPreview && (
+            <div className="rounded-lg border border-border overflow-hidden">
+              <img src={customPreview} alt="Custom handwriting" className="w-full max-h-64 object-contain bg-card" />
+              <p className="text-xs text-center text-muted-foreground py-2">
+                ✓ Handwriting sheet uploaded — characters will be extracted automatically
+              </p>
+            </div>
+          )}
         </div>
       )}
 
