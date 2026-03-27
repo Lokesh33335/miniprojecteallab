@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { CircularJogPad } from '@/components/CircularJogPad';
 import { ConnectionPanel } from '@/components/ConnectionPanel';
 import { FileUpload } from '@/components/FileUpload';
-import { GCodeEditor } from '@/components/GCodeEditor';
+import { GCodeEditor, ConsoleLog } from '@/components/GCodeEditor';
 import { WritingMode } from '@/components/WritingMode';
 import { AIMode } from '@/components/AIMode';
 import { PointerTracker } from '@/components/PointerTracker';
