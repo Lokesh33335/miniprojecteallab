@@ -43,6 +43,12 @@ const Dashboard = () => {
   const [shapeSizeMm, setShapeSizeMm] = useState(40);
   const [pointerX, setPointerX] = useState(0);
   const [pointerY, setPointerY] = useState(0);
+  const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([]);
+
+  const addLog = useCallback((message: string, type: ConsoleLog['type'] = 'sent') => {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setConsoleLogs(prev => [...prev.slice(-99), { time, message, type }]);
+  }, []);
 
   const sendToEsp = useCallback(async (endpoint: string) => {
     try {
