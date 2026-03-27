@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { CircularJogPad } from '@/components/CircularJogPad';
 import { ConnectionPanel } from '@/components/ConnectionPanel';
 import { FileUpload } from '@/components/FileUpload';
-import { GCodeEditor } from '@/components/GCodeEditor';
+import { GCodeEditor, ConsoleLog } from '@/components/GCodeEditor';
 import { WritingMode } from '@/components/WritingMode';
 import { AIMode } from '@/components/AIMode';
 import { PointerTracker } from '@/components/PointerTracker';
@@ -43,6 +43,12 @@ const Dashboard = () => {
   const [shapeSizeMm, setShapeSizeMm] = useState(40);
   const [pointerX, setPointerX] = useState(0);
   const [pointerY, setPointerY] = useState(0);
+  const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([]);
+
+  const addLog = useCallback((message: string, type: ConsoleLog['type'] = 'sent') => {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setConsoleLogs(prev => [...prev.slice(-99), { time, message, type }]);
+  }, []);
 
   const sendToEsp = useCallback(async (endpoint: string) => {
     try {
@@ -57,17 +63,22 @@ const Dashboard = () => {
     const cmd = line.trim();
     if (!cmd) return;
 
+    addLog(cmd, 'sent');
+
     const encoded = encodeURIComponent(cmd);
-    // Try multiple common endpoint formats for ESP32 firmwares
     const endpoints = [
       `/gcode?data=${encoded}`,
       `/command?cmd=${encoded}`,
       `/send?gcode=${encoded}`,
     ];
 
-    await Promise.all(endpoints.map((endpoint) => sendToEsp(endpoint)));
-    if (!silent) toast.success(`Sent: ${cmd}`);
-  }, [sendToEsp]);
+    try {
+      await Promise.all(endpoints.map((endpoint) => sendToEsp(endpoint)));
+      if (!silent) addLog(`OK: ${cmd}`, 'info');
+    } catch {
+      addLog(`Failed: ${cmd}`, 'error');
+    }
+  }, [sendToEsp, addLog]);
 
   const sendGcodeProgram = useCallback(async (program: string) => {
     const lines = program
@@ -470,6 +481,7 @@ G28 X0 Y0
                 onExecute={handleExecute}
                 onSave={handleSaveHistory}
                 onSendLine={(line) => void sendGcodeLine(line)}
+                consoleLogs={consoleLogs}
               />
             </CardContent>
           </Card>
