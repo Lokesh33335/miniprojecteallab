@@ -481,6 +481,7 @@ G28 X0 Y0
                 onExecute={handleExecute}
                 onSave={handleSaveHistory}
                 onSendLine={(line) => void sendGcodeLine(line)}
+                consoleLogs={consoleLogs}
               />
             </CardContent>
           </Card>
