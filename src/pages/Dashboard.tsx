@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { CircularJogPad } from '@/components/CircularJogPad';
@@ -28,7 +29,7 @@ const Dashboard = () => {
   const [espIp, setEspIp] = useState('192.168.4.1');
   const [connected, setConnected] = useState(false);
   const [mainMode, setMainMode] = useState<'drawing' | 'writing'>('drawing');
-  const [drawTab, setDrawTab] = useState<'upload' | 'ai'>('upload');
+  const [drawTab, setDrawTab] = useState<'upload' | 'ai' | 'shapes'>('upload');
   const [gcode, setGCode] = useState('');
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showServoDialog, setShowServoDialog] = useState(false);
@@ -37,29 +38,76 @@ const Dashboard = () => {
   const [servoUp, setServoUp] = useState(190);
   const [servoDown, setServoDown] = useState(90);
   const [jogStep, setJogStep] = useState(10);
+  const [jogUnit, setJogUnit] = useState<'mm' | 'cm'>('mm');
+  const [shapeType, setShapeType] = useState<'square' | 'circle' | 'triangle' | 'star'>('square');
+  const [shapeSizeMm, setShapeSizeMm] = useState(40);
   const [pointerX, setPointerX] = useState(0);
   const [pointerY, setPointerY] = useState(0);
 
   const sendToEsp = useCallback(async (endpoint: string) => {
     try {
-      await fetch(`http://${espIp}/${endpoint}`, { mode: 'no-cors' });
+      const normalized = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+      await fetch(`http://${espIp}${normalized}`, { mode: 'no-cors' });
     } catch {
       // ESP32 may not return CORS headers, but request is sent
     }
   }, [espIp]);
 
-  const handleJog = useCallback((axis: string, distance: number) => {
-    let dir = '';
-    if (axis === 'X' && distance > 0) dir = 'xplus';
-    else if (axis === 'X' && distance < 0) dir = 'xminus';
-    else if (axis === 'Y' && distance > 0) dir = 'yplus';
-    else if (axis === 'Y' && distance < 0) dir = 'yminus';
-    if (dir) sendToEsp(dir);
+  const sendGcodeLine = useCallback(async (line: string, silent = false) => {
+    const cmd = line.trim();
+    if (!cmd) return;
+
+    const encoded = encodeURIComponent(cmd);
+    // Try multiple common endpoint formats for ESP32 firmwares
+    const endpoints = [
+      `/gcode?data=${encoded}`,
+      `/command?cmd=${encoded}`,
+      `/send?gcode=${encoded}`,
+    ];
+
+    await Promise.all(endpoints.map((endpoint) => sendToEsp(endpoint)));
+    if (!silent) toast.success(`Sent: ${cmd}`);
   }, [sendToEsp]);
 
+  const sendGcodeProgram = useCallback(async (program: string) => {
+    const lines = program
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith(';'));
+
+    for (const line of lines) {
+      await sendGcodeLine(line, true);
+    }
+  }, [sendGcodeLine]);
+
+  const jogStepMm = Math.max(0.1, Number.isFinite(jogStep) ? jogStep : 1) * (jogUnit === 'cm' ? 10 : 1);
+
+  const handleJog = useCallback((dx: number, dy: number) => {
+    const xMove = Number((dx * jogStepMm).toFixed(2));
+    const yMove = Number((dy * jogStepMm).toFixed(2));
+
+    if (dx !== 0 && dy === 0) {
+      sendToEsp(`${dx > 0 ? 'xplus' : 'xminus'}?step=${jogStepMm}&unit=mm`);
+    }
+
+    if (dy !== 0 && dx === 0) {
+      sendToEsp(`${dy > 0 ? 'yplus' : 'yminus'}?step=${jogStepMm}&unit=mm`);
+    }
+
+    // Fallback precise move so input distance is respected (including diagonals)
+    const g0 = `G0${xMove ? ` X${xMove}` : ''}${yMove ? ` Y${yMove}` : ''} F1200`;
+    void sendGcodeProgram(`G91\n${g0}\nG90`);
+
+    setPointerX((prev) => Number((Math.max(0, prev + xMove)).toFixed(2)));
+    setPointerY((prev) => Number((Math.max(0, prev + yMove)).toFixed(2)));
+  }, [jogStepMm, sendGcodeProgram, sendToEsp]);
+
   const handleHome = useCallback(() => {
+    setPointerX(0);
+    setPointerY(0);
     sendToEsp('home');
-  }, [sendToEsp]);
+    void sendGcodeProgram('G28 X0 Y0');
+  }, [sendGcodeProgram, sendToEsp]);
 
   const handleExecute = useCallback(() => {
     if (gcode.trim()) setShowConfirmDialog(true);
@@ -69,9 +117,9 @@ const Dashboard = () => {
     setShowConfirmDialog(false);
     // Send G-Code with home-first prefix
     const fullGCode = `G28 X0 Y0\n${gcode}`;
-    sendToEsp(`gcode?data=${encodeURIComponent(fullGCode)}`);
+    void sendGcodeProgram(fullGCode);
     toast.success('Job started! Machine homing then executing...');
-  }, [gcode, sendToEsp]);
+  }, [gcode, sendGcodeProgram]);
 
   const handleSaveHistory = useCallback(async () => {
     if (!user || !gcode.trim()) return;
@@ -87,23 +135,28 @@ const Dashboard = () => {
   }, [user, gcode, mainMode]);
 
   const handleImageUpload = useCallback((file: File) => {
-    // Convert image to G-Code (simplified placeholder)
     toast.info(`Processing ${file.name}... Converting to G-Code`);
     const reader = new FileReader();
     reader.onload = () => {
-      // Placeholder G-Code generation from image
+      // A4-safe drawing area (keeps drawing inside the page)
+      const minX = 15;
+      const minY = 15;
+      const maxX = 195;
+      const maxY = 282;
       const code = `; Image: ${file.name}
 ; Converted to G-Code
 G21 ; mm
 G90 ; absolute
 G28 X0 Y0 ; home
 M03 S${servoUp} ; pen up
-G0 X0 Y0
+; A4 drawing window: X${minX}-${maxX}, Y${minY}-${maxY}
+G0 X${minX} Y${minY}
 M03 S${servoDown} ; pen down
-G1 X100 Y0 F1000
-G1 X100 Y100
-G1 X0 Y100
-G1 X0 Y0
+G1 X${maxX} Y${minY} F1000
+G1 X${maxX} Y${maxY}
+G1 X${minX} Y${maxY}
+G1 X${minX} Y${minY}
+; TODO: replace with traced image paths if needed
 M03 S${servoUp} ; pen up
 G28 X0 Y0 ; home
 `;
@@ -114,6 +167,81 @@ G28 X0 Y0 ; home
   }, [servoUp, servoDown]);
 
   const handleGCodeGenerated = useCallback((code: string) => setGCode(code), []);
+
+  const handleGenerateShape = useCallback(() => {
+    const half = Math.max(5, shapeSizeMm) / 2;
+    const centerX = 105;
+    const centerY = 148;
+
+    let path = '';
+
+    if (shapeType === 'square') {
+      path = `
+G0 X${centerX - half} Y${centerY - half}
+M03 S${servoDown}
+G1 X${centerX + half} Y${centerY - half} F1000
+G1 X${centerX + half} Y${centerY + half}
+G1 X${centerX - half} Y${centerY + half}
+G1 X${centerX - half} Y${centerY - half}
+`;
+    } else if (shapeType === 'triangle') {
+      path = `
+G0 X${centerX} Y${centerY + half}
+M03 S${servoDown}
+G1 X${centerX + half} Y${centerY - half} F1000
+G1 X${centerX - half} Y${centerY - half}
+G1 X${centerX} Y${centerY + half}
+`;
+    } else if (shapeType === 'star') {
+      path = `
+G0 X${centerX} Y${centerY + half}
+M03 S${servoDown}
+G1 X${centerX + half * 0.25} Y${centerY + half * 0.2} F1000
+G1 X${centerX + half} Y${centerY + half * 0.2}
+G1 X${centerX + half * 0.35} Y${centerY - half * 0.15}
+G1 X${centerX + half * 0.55} Y${centerY - half}
+G1 X${centerX} Y${centerY - half * 0.35}
+G1 X${centerX - half * 0.55} Y${centerY - half}
+G1 X${centerX - half * 0.35} Y${centerY - half * 0.15}
+G1 X${centerX - half} Y${centerY + half * 0.2}
+G1 X${centerX - half * 0.25} Y${centerY + half * 0.2}
+G1 X${centerX} Y${centerY + half}
+`;
+    } else {
+      // circle approximation
+      const points = 24;
+      const coords: string[] = [];
+      for (let i = 0; i <= points; i += 1) {
+        const angle = (Math.PI * 2 * i) / points;
+        const x = Number((centerX + Math.cos(angle) * half).toFixed(2));
+        const y = Number((centerY + Math.sin(angle) * half).toFixed(2));
+        coords.push(`${x},${y}`);
+      }
+      const [first, ...rest] = coords;
+      const [fx, fy] = first.split(',');
+      path = `
+G0 X${fx} Y${fy}
+M03 S${servoDown}
+${rest.map((pair, index) => {
+  const [x, y] = pair.split(',');
+  return `G1 X${x} Y${y}${index === 0 ? ' F1000' : ''}`;
+}).join('\n')}
+`;
+    }
+
+    const shapeCode = `; Shape Mode (${shapeType})
+G21
+G90
+G28 X0 Y0
+M03 S${servoUp}
+${path}
+M03 S${servoUp}
+G28 X0 Y0
+`;
+
+    setGCode(shapeCode);
+    toast.success(`${shapeType} G-Code generated`);
+  }, [shapeSizeMm, shapeType, servoDown, servoUp]);
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -188,6 +316,9 @@ G28 X0 Y0 ; home
         <button className="menu-bar-item" onClick={() => { setMainMode('drawing'); setDrawTab('ai'); }}>
           <Wand2 className="w-3.5 h-3.5 inline mr-1" /> AI
         </button>
+        <button className="menu-bar-item" onClick={() => { setMainMode('drawing'); setDrawTab('shapes'); }}>
+          Shapes
+        </button>
         <button className="menu-bar-item" onClick={() => setShowServoDialog(true)}>
           <Settings2 className="w-3.5 h-3.5 inline mr-1" /> Servo
         </button>
@@ -217,7 +348,7 @@ G28 X0 Y0 ; home
               <CardTitle className="text-xs">Jog Control</CardTitle>
             </CardHeader>
             <CardContent className="p-3 pt-0 flex flex-col items-center">
-              <CircularJogPad onJog={handleJog} onHome={handleHome} step={jogStep} />
+              <CircularJogPad onJog={handleJog} onHome={handleHome} stepLabel={`${jogStep}${jogUnit}`} />
               <div className="flex items-center gap-2 mt-2 w-full">
                 <Label className="text-xs">Step:</Label>
                 <Input
@@ -225,10 +356,19 @@ G28 X0 Y0 ; home
                   value={jogStep}
                   onChange={(e) => setJogStep(Number(e.target.value))}
                   className="h-7 text-xs"
-                  min={1}
+                  min={0.1}
+                  step={0.1}
                   max={100}
                 />
-                <span className="text-xs text-muted-foreground">mm</span>
+                <Select value={jogUnit} onValueChange={(v) => setJogUnit(v as 'mm' | 'cm')}>
+                  <SelectTrigger className="h-7 text-xs w-[72px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mm">mm</SelectItem>
+                    <SelectItem value="cm">cm</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>
@@ -267,16 +407,47 @@ G28 X0 Y0 ; home
             </CardHeader>
             <CardContent>
               {mainMode === 'drawing' ? (
-                <Tabs value={drawTab} onValueChange={(v) => setDrawTab(v as 'upload' | 'ai')}>
+                <Tabs value={drawTab} onValueChange={(v) => setDrawTab(v as 'upload' | 'ai' | 'shapes')}>
                   <TabsList className="mb-4">
                     <TabsTrigger value="upload">Upload Image</TabsTrigger>
                     <TabsTrigger value="ai">AI Pencil Sketch</TabsTrigger>
+                    <TabsTrigger value="shapes">Shapes</TabsTrigger>
                   </TabsList>
                   <TabsContent value="upload">
                     <FileUpload onFileSelect={handleImageUpload} accept="image/*" label="Upload image to draw" />
                   </TabsContent>
                   <TabsContent value="ai">
                     <AIMode onGCodeGenerated={handleGCodeGenerated} />
+                  </TabsContent>
+                  <TabsContent value="shapes">
+                    <div className="space-y-4">
+                      <div>
+                        <Label>Shape</Label>
+                        <Select value={shapeType} onValueChange={(v) => setShapeType(v as 'square' | 'circle' | 'triangle' | 'star')}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="square">Square</SelectItem>
+                            <SelectItem value="circle">Circle</SelectItem>
+                            <SelectItem value="triangle">Triangle</SelectItem>
+                            <SelectItem value="star">Star</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Size (mm)</Label>
+                        <Input
+                          type="number"
+                          min={10}
+                          max={150}
+                          value={shapeSizeMm}
+                          onChange={(e) => setShapeSizeMm(Number(e.target.value))}
+                          className="mt-1"
+                        />
+                      </div>
+                      <Button onClick={handleGenerateShape} className="w-full">Generate Shape G-Code</Button>
+                    </div>
                   </TabsContent>
                 </Tabs>
               ) : (
@@ -298,7 +469,7 @@ G28 X0 Y0 ; home
                 onChange={setGCode}
                 onExecute={handleExecute}
                 onSave={handleSaveHistory}
-                onSendLine={(line) => sendToEsp(`gcode?data=${encodeURIComponent(line)}`)}
+                onSendLine={(line) => void sendGcodeLine(line)}
               />
             </CardContent>
           </Card>

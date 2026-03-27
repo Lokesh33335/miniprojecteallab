@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Play, Square, Save, Trash2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Play, Save, Send, Trash2 } from 'lucide-react';
 
 interface GCodeEditorProps {
   gcode: string;
@@ -12,11 +13,18 @@ interface GCodeEditorProps {
 }
 
 export const GCodeEditor = ({ gcode, onChange, onExecute, onSave, onSendLine }: GCodeEditorProps) => {
-  const [currentLine, setCurrentLine] = useState(0);
+  const [commandLine, setCommandLine] = useState('');
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const lines = gcode.split('\n').filter((l) => l.trim());
   const lineCount = lines.length;
+
+  const handleSendLine = () => {
+    const line = commandLine.trim();
+    if (!line) return;
+    onSendLine(line);
+    setCommandLine('');
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -43,10 +51,28 @@ export const GCodeEditor = ({ gcode, onChange, onExecute, onSave, onSendLine }: 
         />
       </div>
 
-      <div className="flex gap-2 mt-3">
+      <div className="grid grid-cols-1 gap-2 mt-3">
         <Button onClick={onExecute} disabled={!gcode.trim()} className="flex-1">
           <Play className="w-4 h-4 mr-1" /> Execute
         </Button>
+
+        <div className="flex gap-2">
+          <Input
+            value={commandLine}
+            onChange={(e) => setCommandLine(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSendLine();
+              }
+            }}
+            placeholder="Console command (e.g., G0 X10 Y10)"
+            className="h-9 font-mono text-xs"
+          />
+          <Button size="sm" onClick={handleSendLine} disabled={!commandLine.trim()}>
+            <Send className="w-3.5 h-3.5" /> Send
+          </Button>
+        </div>
       </div>
     </div>
   );
