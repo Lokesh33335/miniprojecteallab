@@ -63,17 +63,22 @@ const Dashboard = () => {
     const cmd = line.trim();
     if (!cmd) return;
 
+    addLog(cmd, 'sent');
+
     const encoded = encodeURIComponent(cmd);
-    // Try multiple common endpoint formats for ESP32 firmwares
     const endpoints = [
       `/gcode?data=${encoded}`,
       `/command?cmd=${encoded}`,
       `/send?gcode=${encoded}`,
     ];
 
-    await Promise.all(endpoints.map((endpoint) => sendToEsp(endpoint)));
-    if (!silent) toast.success(`Sent: ${cmd}`);
-  }, [sendToEsp]);
+    try {
+      await Promise.all(endpoints.map((endpoint) => sendToEsp(endpoint)));
+      if (!silent) addLog(`OK: ${cmd}`, 'info');
+    } catch {
+      addLog(`Failed: ${cmd}`, 'error');
+    }
+  }, [sendToEsp, addLog]);
 
   const sendGcodeProgram = useCallback(async (program: string) => {
     const lines = program
